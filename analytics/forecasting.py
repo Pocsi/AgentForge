@@ -3,22 +3,15 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import json
 import re
+import json
 
-# Import specialized forecasting libraries
 try:
+    import statsmodels.api as sm
     from statsmodels.tsa.arima.model import ARIMA
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
     STATSMODELS_AVAILABLE = True
 except ImportError:
     STATSMODELS_AVAILABLE = False
-
-try:
-    from prophet import Prophet
-    PROPHET_AVAILABLE = True
-except ImportError:
-    PROPHET_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +31,9 @@ class Forecaster:
         self.config = config
         self.prediction_horizon = config.get("prediction_horizon", 7)
         self.confidence_interval = config.get("confidence_interval", 0.95)
-        self.methods = config.get("methods", ["arima", "prophet", "lstm"])
+        self.methods = config.get("methods", ["arima", "naive"])
         
-        # Distributed compute for parallel model training
+        # Distributed compute for parallel processing
         self.distributed_compute = distributed_compute
         
         # Cache for recent forecasts
@@ -59,7 +52,7 @@ class Forecaster:
         Returns:
             Dictionary with forecast results
         """
-        logger.info(f"Generating forecast with query: {query}")
+        logger.info(f"Forecasting with query: {query}")
         
         try:
             # Check if this query is in the cache
@@ -74,10 +67,10 @@ class Forecaster:
             # Get data from the appropriate source
             data = self._get_data(data_source, parameters)
             
-            if data.empty:
+            if data is None or len(data) == 0:
                 return {"status": "error", "message": "No data available for forecasting"}
             
-            # Generate the forecast
+            # Generate forecast
             results = self._generate_forecast(data, horizon, parameters)
             
             # Cache the results
@@ -86,7 +79,7 @@ class Forecaster:
             return results
             
         except Exception as e:
-            logger.error(f"Error generating forecast: {str(e)}")
+            logger.error(f"Error forecasting: {str(e)}")
             return {
                 "status": "error",
                 "message": str(e)
@@ -95,7 +88,7 @@ class Forecaster:
     def _generate_cache_key(self, query: str) -> str:
         """Generate a cache key from a query"""
         # Simple hash function for the query
-        return f"fc_{hash(query) % 1000000}"
+        return f"forecast_{hash(query) % 1000000}"
     
     def _cache_forecast(self, key: str, results: Dict[str, Any]) -> None:
         """Add forecast results to the cache"""
@@ -122,15 +115,13 @@ class Forecaster:
         # Default values
         horizon = self.prediction_horizon
         data_source = "sample"
-        parameters = {
-            "methods": self.methods.copy()
-        }
+        parameters = {}
         
-        # Extract prediction horizon
-        horizon_match = re.search(r'(?:next|for|predict)\s+(\d+)\s+(day|week|month|year)s?', query)
+        # Extract forecast horizon
+        horizon_match = re.search(r'(next|following)\s+(\d+)\s+(day|week|month|year)s?', query)
         if horizon_match:
-            amount = int(horizon_match.group(1))
-            unit = horizon_match.group(2)
+            amount = int(horizon_match.group(2))
+            unit = horizon_match.group(3)
             
             if unit == "day":
                 horizon = amount
@@ -144,27 +135,38 @@ class Forecaster:
         # Determine data source
         if "database" in query or "db" in query:
             data_source = "database"
-        elif "csv" in query or "file" in query:
+        elif "file" in query or "csv" in query:
             data_source = "file"
-        elif "api" in query or "service" in query:
-            data_source = "api"
-        elif "sensor" in query or "iot" in query:
-            data_source = "sensor"
         
-        # Determine forecast methods
+        # Extract history length for analysis
+        history_match = re.search(r'(using|with|based on|from)\s+(last|past)\s+(\d+)\s+(day|week|month|year)s?', query)
+        if history_match:
+            amount = int(history_match.group(3))
+            unit = history_match.group(4)
+            
+            if unit == "day":
+                parameters["history_window"] = amount
+            elif unit == "week":
+                parameters["history_window"] = amount * 7
+            elif unit == "month":
+                parameters["history_window"] = amount * 30
+            elif unit == "year":
+                parameters["history_window"] = amount * 365
+        
+        # Extract model preferences
         if "arima" in query:
-            parameters["methods"] = ["arima"]
+            parameters["preferred_model"] = "arima"
         elif "prophet" in query:
-            parameters["methods"] = ["prophet"]
-        elif "lstm" in query:
-            parameters["methods"] = ["lstm"]
+            parameters["preferred_model"] = "prophet"
+        elif "lstm" in query or "neural" in query:
+            parameters["preferred_model"] = "lstm"
         elif "ensemble" in query:
-            parameters["methods"] = ["arima", "prophet"]
+            parameters["preferred_model"] = "ensemble"
         
-        # Specific field or metric
-        field_match = re.search(r'for\s+([a-zA-Z0-9_]+)', query)
-        if field_match:
-            parameters["field"] = field_match.group(1)
+        # Extract confidence interval
+        ci_match = re.search(r'(\d+)%\s+confidence', query)
+        if ci_match:
+            parameters["confidence_interval"] = float(ci_match.group(1)) / 100.0
         
         return horizon, data_source, parameters
     
@@ -179,37 +181,53 @@ class Forecaster:
         Returns:
             Pandas DataFrame with time series data
         """
-        # For now, we'll just generate sample data
-        # In a real implementation, this would connect to databases, files, APIs, etc.
+        if data_source == "database" or data_source == "file":
+            # In a real implementation, this would connect to databases or files
+            # For now, just generate sample data
+            logger.info(f"Using sample data for {data_source} source")
+            return self._generate_sample_data(parameters)
+        else:
+            # Generate sample data
+            return self._generate_sample_data(parameters)
+    
+    def _generate_sample_data(self, parameters: Dict[str, Any]) -> pd.DataFrame:
+        """
+        Generate sample time series data for forecasting
+        
+        Args:
+            parameters: Data generation parameters
+            
+        Returns:
+            Pandas DataFrame with time series data
+        """
+        # Data parameters
+        days = parameters.get("history_window", 90)  # Default to 90 days of history
         
         # Generate date range
-        window_days = parameters.get("window_days", 90)  # Use more historical data for forecasting
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=window_days)
-        date_range = pd.date_range(start=start_date, end=end_date, freq='1D')
+        start_date = end_date - timedelta(days=days)
+        dates = pd.date_range(start=start_date, end=end_date, freq="D")
         
-        # Generate sample data
-        if data_source == "sensor" or data_source == "iot":
-            # More variable data for sensors
-            base = 100
-            trend = np.linspace(0, 20, len(date_range))
-            seasonality = 15 * np.sin(np.linspace(0, 4 * np.pi, len(date_range)))
-            noise = np.random.normal(0, 5, len(date_range))
-            values = base + trend + seasonality + noise
-            
-        else:
-            # More stable data for general time series
-            base = 500
-            trend = np.linspace(0, 50, len(date_range))
-            seasonality = 30 * np.sin(np.linspace(0, 2 * np.pi, len(date_range)))
-            noise = np.random.normal(0, 10, len(date_range))
-            values = base + trend + seasonality + noise
+        # Generate trend component (linear with slight exponential growth)
+        trend = np.linspace(100, 200, num=len(dates))
+        trend = trend * (1 + 0.001 * np.arange(len(dates)))
+        
+        # Generate seasonal component (weekly pattern)
+        t = np.arange(len(dates))
+        weekly_pattern = 10 * np.sin(2 * np.pi * t / 7)
+        
+        # Add a long-term seasonal component (yearly pattern)
+        yearly_pattern = 30 * np.sin(2 * np.pi * t / 365)
+        
+        # Generate random component
+        np.random.seed(42)  # For reproducibility
+        noise = np.random.normal(0, 5, size=len(dates))
+        
+        # Combine components
+        values = trend + weekly_pattern + yearly_pattern + noise
         
         # Create DataFrame
-        df = pd.DataFrame({
-            'timestamp': date_range,
-            'value': values
-        })
+        df = pd.DataFrame({"value": values}, index=dates)
         
         return df
     
@@ -230,131 +248,97 @@ class Forecaster:
         Returns:
             Dictionary with forecast results
         """
-        # Set timestamp as index if it's not already
-        if 'timestamp' in data.columns:
-            data = data.set_index('timestamp')
-        
-        # Select the field to forecast
-        field = parameters.get("field", "value")
-        if field not in data.columns and data.index.name != field:
-            field = data.columns[0]
-        
-        series = data[field] if field in data.columns else data.iloc[:, 0]
-        
-        # Generate forecast dates
-        last_date = series.index[-1]
-        forecast_dates = pd.date_range(
-            start=last_date + pd.Timedelta(days=1),
-            periods=horizon,
-            freq='1D'
-        )
-        
-        # Determine which methods to use
-        methods = parameters.get("methods", self.methods)
-        
-        # Generate forecasts using different methods
-        forecasts = {}
-        futures = []
-        
-        # Use distributed compute for parallel model training if available
-        if self.distributed_compute:
-            # Submit forecast jobs
-            for method in methods:
-                if method == "arima" and STATSMODELS_AVAILABLE:
-                    futures.append((
-                        method,
-                        self.distributed_compute.submit(
-                            self._forecast_arima,
-                            series,
-                            horizon,
-                            self.confidence_interval
-                        )
-                    ))
-                
-                elif method == "prophet" and PROPHET_AVAILABLE:
-                    futures.append((
-                        method,
-                        self.distributed_compute.submit(
-                            self._forecast_prophet,
-                            series,
-                            horizon,
-                            self.confidence_interval
-                        )
-                    ))
-                
-                elif method == "lstm":
-                    futures.append((
-                        method,
-                        self.distributed_compute.submit(
-                            self._forecast_lstm,
-                            series,
-                            horizon,
-                            self.confidence_interval
-                        )
-                    ))
-            
-            # Collect results
-            for method, future in futures:
-                try:
-                    forecasts[method] = future.result()
-                except Exception as e:
-                    logger.error(f"Error with {method} forecast: {str(e)}")
-                    forecasts[method] = None
-        
+        # Extract the time series
+        if isinstance(data, pd.DataFrame):
+            series = data.iloc[:, 0]
         else:
-            # Sequential execution
-            for method in methods:
-                try:
-                    if method == "arima" and STATSMODELS_AVAILABLE:
-                        forecasts[method] = self._forecast_arima(series, horizon, self.confidence_interval)
-                    
-                    elif method == "prophet" and PROPHET_AVAILABLE:
-                        forecasts[method] = self._forecast_prophet(series, horizon, self.confidence_interval)
-                    
-                    elif method == "lstm":
-                        forecasts[method] = self._forecast_lstm(series, horizon, self.confidence_interval)
-                
-                except Exception as e:
-                    logger.error(f"Error with {method} forecast: {str(e)}")
-                    forecasts[method] = None
+            series = data
         
-        # Create ensemble forecast if multiple methods were successful
-        successful_forecasts = [f for f in forecasts.values() if f is not None]
+        # Forecast dates (continuing from data's last date)
+        last_date = series.index[-1]
+        forecast_dates = pd.date_range(start=last_date + timedelta(days=1), periods=horizon, freq="D")
         
-        if len(successful_forecasts) > 1:
-            ensemble_forecast = self._create_ensemble_forecast(successful_forecasts, forecast_dates)
-            forecasts["ensemble"] = ensemble_forecast
+        # Choose forecasting method
+        method = parameters.get("preferred_model", "ensemble")
+        confidence_interval = parameters.get("confidence_interval", self.confidence_interval)
         
-        # Prepare forecast data for visualization
-        forecast_data = {}
-        for method, forecast in forecasts.items():
-            if forecast is not None:
-                forecast_data[method] = []
-                
-                for i, date in enumerate(forecast_dates):
-                    forecast_data[method].append({
-                        "timestamp": date.isoformat(),
-                        "value": float(forecast["mean"][i]),
-                        "lower_bound": float(forecast["lower"][i]),
-                        "upper_bound": float(forecast["upper"][i])
-                    })
+        forecasts = []
         
-        # Prepare historical data
+        # Generate forecasts with different methods
+        if method == "ensemble" or method == "arima" or method in self.methods:
+            arima_forecast = self._forecast_arima(series, horizon, confidence_interval)
+            forecasts.append(arima_forecast)
+        
+        if (method == "ensemble" or method == "prophet" or method in self.methods) and "prophet" in self.methods:
+            try:
+                prophet_forecast = self._forecast_prophet(series, horizon, confidence_interval)
+                forecasts.append(prophet_forecast)
+            except ImportError:
+                logger.warning("Prophet not available, skipping prophet forecast")
+        
+        if (method == "ensemble" or method == "lstm" or method in self.methods) and "lstm" in self.methods:
+            try:
+                lstm_forecast = self._forecast_lstm(series, horizon, confidence_interval)
+                forecasts.append(lstm_forecast)
+            except ImportError:
+                logger.warning("Deep learning libraries not available, skipping LSTM forecast")
+        
+        # Always include naive forecast as a baseline
+        naive_forecast = self._naive_forecast(series, horizon, confidence_interval)
+        if method != "ensemble":
+            forecasts = [naive_forecast]  # Only use naive as fallback
+        else:
+            forecasts.append(naive_forecast)
+        
+        # Create ensemble forecast if multiple methods were used
+        if len(forecasts) > 1:
+            final_forecast = self._create_ensemble_forecast(forecasts, forecast_dates)
+            model_name = "Ensemble"
+        else:
+            final_forecast = forecasts[0]
+            model_name = "ARIMA" if method == "arima" else "Prophet" if method == "prophet" else "LSTM" if method == "lstm" else "Naive"
+        
+        # Prepare historical data for visualization
         historical_data = []
-        for timestamp, value in zip(series.index, series.values):
+        for idx, value in enumerate(series):
             historical_data.append({
-                "timestamp": timestamp.isoformat(),
+                "time": series.index[idx].isoformat(),
                 "value": float(value)
             })
         
+        # Prepare forecast data
+        forecast_data = []
+        lower_bound_data = []
+        upper_bound_data = []
+        
+        for i in range(len(forecast_dates)):
+            # Main forecast
+            forecast_data.append({
+                "time": forecast_dates[i].isoformat(),
+                "value": float(final_forecast["forecast"][i])
+            })
+            
+            # Bounds
+            if "lower_bound" in final_forecast and "upper_bound" in final_forecast:
+                lower_bound_data.append({
+                    "time": forecast_dates[i].isoformat(),
+                    "value": float(final_forecast["lower_bound"][i])
+                })
+                
+                upper_bound_data.append({
+                    "time": forecast_dates[i].isoformat(),
+                    "value": float(final_forecast["upper_bound"][i])
+                })
+        
         return {
             "status": "success",
-            "field": field,
+            "model": model_name,
             "horizon": horizon,
-            "confidence_interval": self.confidence_interval,
-            "methods": list(forecast_data.keys()),
+            "confidence_interval": confidence_interval,
             "historical_data": historical_data,
-            "forecast_data": forecast_data
+            "forecast_data": forecast_data,
+            "lower_bound": lower_bound_data,
+            "upper_bound": upper_bound_data
         }
     
     def _forecast_arima(
@@ -375,51 +359,73 @@ class Forecaster:
             Dictionary with forecast results
         """
         if not STATSMODELS_AVAILABLE:
-            raise ImportError("statsmodels is required for ARIMA forecasting")
+            logger.warning("Statsmodels not available, using naive forecast")
+            return self._naive_forecast(series, horizon, confidence_interval)
         
-        # Simple automatic order selection (p,d,q)
-        # In a real application, this would be more sophisticated
         try:
-            # Try to find the best order using different combinations
-            orders = [(1,1,1), (2,1,2), (1,1,0), (0,1,1)]
-            best_model = None
-            best_aic = float('inf')
+            # Try to fit ARIMA model
+            # Use auto_arima to determine optimal order if available, otherwise use default (1,1,1)
+            try:
+                from pmdarima import auto_arima
+                model = auto_arima(
+                    series,
+                    seasonal=True,
+                    m=7,  # Weekly seasonality
+                    max_p=5,
+                    max_d=2,
+                    max_q=5,
+                    suppress_warnings=True,
+                    error_action="ignore"
+                )
+                order = model.order
+                seasonal_order = model.seasonal_order
+                
+                # Re-fit with statsmodels ARIMA for forecasting
+                model = sm.tsa.statespace.SARIMAX(
+                    series,
+                    order=order,
+                    seasonal_order=seasonal_order
+                )
+            except ImportError:
+                # Default ARIMA(1,1,1) model
+                model = ARIMA(series, order=(1, 1, 1))
             
-            for order in orders:
-                try:
-                    model = ARIMA(series, order=order)
-                    model_fit = model.fit()
-                    
-                    if model_fit.aic < best_aic:
-                        best_aic = model_fit.aic
-                        best_model = model_fit
-                except:
-                    continue
+            # Fit the model
+            fit_model = model.fit()
             
-            if best_model is None:
-                # Fallback to default order
-                model = ARIMA(series, order=(1,1,1))
-                best_model = model.fit()
-            
-            # Generate forecast
-            forecast = best_model.forecast(steps=horizon)
+            # Make forecast
+            forecast = fit_model.forecast(steps=horizon)
+            forecast_values = forecast.values if hasattr(forecast, 'values') else np.array(forecast)
             
             # Get prediction intervals
             alpha = 1 - confidence_interval
-            pred_int = best_model.get_forecast(steps=horizon).conf_int(alpha=alpha)
-            lower = pred_int.iloc[:, 0].values
-            upper = pred_int.iloc[:, 1].values
+            try:
+                pred_interval = fit_model.get_forecast(steps=horizon).conf_int(alpha=alpha)
+                lower_bound = pred_interval.iloc[:, 0].values
+                upper_bound = pred_interval.iloc[:, 1].values
+            except:
+                # Fallback method for confidence intervals
+                std_errors = np.sqrt(fit_model.cov_params().diagonal())
+                std_forecast = np.std(forecast_values) if len(forecast_values) > 1 else std_errors.mean()
+                
+                z_value = 1.96  # Approximation for 95% confidence
+                if confidence_interval > 0.95:
+                    z_value = 2.58  # Approximation for 99% confidence
+                elif confidence_interval < 0.9:
+                    z_value = 1.65  # Approximation for 90% confidence
+                
+                margin = z_value * std_forecast
+                lower_bound = forecast_values - margin
+                upper_bound = forecast_values + margin
             
             return {
-                "mean": forecast.values,
-                "lower": lower,
-                "upper": upper
+                "forecast": forecast_values,
+                "lower_bound": lower_bound,
+                "upper_bound": upper_bound
             }
             
         except Exception as e:
             logger.error(f"Error in ARIMA forecast: {str(e)}")
-            
-            # Fallback to naive forecast
             return self._naive_forecast(series, horizon, confidence_interval)
     
     def _forecast_prophet(
@@ -439,11 +445,10 @@ class Forecaster:
         Returns:
             Dictionary with forecast results
         """
-        if not PROPHET_AVAILABLE:
-            raise ImportError("prophet is required for Prophet forecasting")
-        
         try:
-            # Prepare data for Prophet
+            from prophet import Prophet
+            
+            # Prepare data for Prophet (requires specific format)
             df = pd.DataFrame({
                 'ds': series.index,
                 'y': series.values
@@ -453,27 +458,28 @@ class Forecaster:
             model = Prophet(interval_width=confidence_interval)
             model.fit(df)
             
-            # Create future dataframe for prediction
+            # Make future dataframe for prediction
             future = model.make_future_dataframe(periods=horizon)
             
-            # Generate forecast
+            # Forecast
             forecast = model.predict(future)
             
-            # Extract forecast values
-            mean = forecast.tail(horizon)['yhat'].values
-            lower = forecast.tail(horizon)['yhat_lower'].values
-            upper = forecast.tail(horizon)['yhat_upper'].values
+            # Extract results (only for the forecast horizon)
+            forecast_values = forecast['yhat'].values[-horizon:]
+            lower_bound = forecast['yhat_lower'].values[-horizon:]
+            upper_bound = forecast['yhat_upper'].values[-horizon:]
             
             return {
-                "mean": mean,
-                "lower": lower,
-                "upper": upper
+                "forecast": forecast_values,
+                "lower_bound": lower_bound,
+                "upper_bound": upper_bound
             }
             
+        except ImportError:
+            logger.warning("Prophet not available, using naive forecast")
+            return self._naive_forecast(series, horizon, confidence_interval)
         except Exception as e:
             logger.error(f"Error in Prophet forecast: {str(e)}")
-            
-            # Fallback to naive forecast
             return self._naive_forecast(series, horizon, confidence_interval)
     
     def _forecast_lstm(
@@ -493,45 +499,48 @@ class Forecaster:
         Returns:
             Dictionary with forecast results
         """
-        # This is a simplified version that doesn't actually use LSTM
-        # In a real application, this would use PyTorch or TensorFlow
-        
         try:
-            # Use simple exponential smoothing as a substitute
+            # In a real implementation, this would use TensorFlow or PyTorch for LSTM
+            # For simplicity, we'll use a basic statistical method as a proxy
+            
+            # Use simple exponential smoothing as a proxy for LSTM
             from statsmodels.tsa.holtwinters import ExponentialSmoothing
             
-            # Fit model
+            # Fit exponential smoothing model
             model = ExponentialSmoothing(
                 series,
                 trend='add',
                 seasonal='add',
-                seasonal_periods=7  # Assume weekly seasonality
+                seasonal_periods=7  # Weekly seasonality
             )
-            model_fit = model.fit()
+            fit_model = model.fit()
             
-            # Generate forecast
-            forecast = model_fit.forecast(horizon)
+            # Forecast
+            forecast = fit_model.forecast(horizon)
+            forecast_values = forecast.values if hasattr(forecast, 'values') else np.array(forecast)
             
-            # Simple confidence intervals based on historical variance
-            std = series.std()
-            z_value = 1.96  # Approximate 95% confidence
+            # Simple confidence intervals (based on in-sample error)
+            residuals = fit_model.resid
+            resid_std = np.std(residuals)
+            
+            z_value = 1.96  # Approximation for 95% confidence
             if confidence_interval > 0.95:
-                z_value = 2.576  # Approximate 99% confidence
-            elif confidence_interval < 0.95:
-                z_value = 1.645  # Approximate 90% confidence
+                z_value = 2.58  # Approximation for 99% confidence
+            elif confidence_interval < 0.9:
+                z_value = 1.65  # Approximation for 90% confidence
             
-            margin = z_value * std
+            margin = z_value * resid_std
+            lower_bound = forecast_values - margin
+            upper_bound = forecast_values + margin
             
             return {
-                "mean": forecast.values,
-                "lower": forecast.values - margin,
-                "upper": forecast.values + margin
+                "forecast": forecast_values,
+                "lower_bound": lower_bound,
+                "upper_bound": upper_bound
             }
             
         except Exception as e:
             logger.error(f"Error in LSTM forecast: {str(e)}")
-            
-            # Fallback to naive forecast
             return self._naive_forecast(series, horizon, confidence_interval)
     
     def _naive_forecast(
@@ -551,50 +560,32 @@ class Forecaster:
         Returns:
             Dictionary with forecast results
         """
-        # Calculate trend from last 30 days (or less if not available)
-        n = min(30, len(series))
-        recent_values = series[-n:]
+        # Use the mean of the last 7 days for the forecast
+        window = min(7, len(series))
+        last_values = series[-window:].values
+        forecast_value = np.mean(last_values)
         
-        if n >= 2:
-            # Linear trend
-            x = np.arange(n)
-            y = recent_values.values
-            
-            # Simple linear regression
-            slope, intercept = np.polyfit(x, y, 1)
-            
-            # Project forward
-            forecast = np.array([intercept + slope * (n + i) for i in range(horizon)])
-            
-            # Confidence intervals based on recent variance
-            std = recent_values.std()
-            z_value = 1.96  # Approximate 95% confidence
-            if confidence_interval > 0.95:
-                z_value = 2.576  # Approximate 99% confidence
-            elif confidence_interval < 0.95:
-                z_value = 1.645  # Approximate 90% confidence
-            
-            margin = z_value * std
-            
-            return {
-                "mean": forecast,
-                "lower": forecast - margin,
-                "upper": forecast + margin
-            }
-            
-        else:
-            # Not enough data, use last value
-            last_value = series.iloc[-1]
-            forecast = np.array([last_value] * horizon)
-            
-            # Arbitrary confidence interval
-            margin = last_value * 0.1
-            
-            return {
-                "mean": forecast,
-                "lower": forecast - margin,
-                "upper": forecast + margin
-            }
+        # Create constant forecast
+        forecast_values = np.full(horizon, forecast_value)
+        
+        # Calculate standard deviation for confidence intervals
+        std_dev = np.std(last_values)
+        
+        z_value = 1.96  # Approximation for 95% confidence
+        if confidence_interval > 0.95:
+            z_value = 2.58  # Approximation for 99% confidence
+        elif confidence_interval < 0.9:
+            z_value = 1.65  # Approximation for 90% confidence
+        
+        margin = z_value * std_dev
+        lower_bound = forecast_values - margin
+        upper_bound = forecast_values + margin
+        
+        return {
+            "forecast": forecast_values,
+            "lower_bound": lower_bound,
+            "upper_bound": upper_bound
+        }
     
     def _create_ensemble_forecast(
         self, 
@@ -612,15 +603,26 @@ class Forecaster:
             Dictionary with ensemble forecast
         """
         # Average the forecasts
-        mean_values = np.mean([f["mean"] for f in forecasts], axis=0)
-        lower_values = np.mean([f["lower"] for f in forecasts], axis=0)
-        upper_values = np.mean([f["upper"] for f in forecasts], axis=0)
+        forecast_arrays = [f["forecast"] for f in forecasts]
+        ensemble_forecast = np.mean(forecast_arrays, axis=0)
         
-        return {
-            "mean": mean_values,
-            "lower": lower_values,
-            "upper": upper_values
+        # Average the lower bounds
+        lower_arrays = [f["lower_bound"] for f in forecasts if "lower_bound" in f]
+        ensemble_lower = np.mean(lower_arrays, axis=0) if lower_arrays else None
+        
+        # Average the upper bounds
+        upper_arrays = [f["upper_bound"] for f in forecasts if "upper_bound" in f]
+        ensemble_upper = np.mean(upper_arrays, axis=0) if upper_arrays else None
+        
+        result = {
+            "forecast": ensemble_forecast
         }
+        
+        if ensemble_lower is not None and ensemble_upper is not None:
+            result["lower_bound"] = ensemble_lower
+            result["upper_bound"] = ensemble_upper
+        
+        return result
     
     def get_status(self) -> Dict[str, Any]:
         """
@@ -633,8 +635,6 @@ class Forecaster:
             "prediction_horizon": self.prediction_horizon,
             "confidence_interval": self.confidence_interval,
             "methods": self.methods,
-            "cache_size": len(self.forecast_cache),
-            "max_cache_size": self.max_cache_size,
             "statsmodels_available": STATSMODELS_AVAILABLE,
-            "prophet_available": PROPHET_AVAILABLE
+            "cached_forecasts": len(self.forecast_cache)
         }

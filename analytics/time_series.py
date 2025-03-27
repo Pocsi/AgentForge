@@ -1,30 +1,16 @@
 import logging
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Dict, Any, List, Optional, Union
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import json
 import re
-
-# Import specialized time series libraries
-try:
-    import statsmodels.api as sm
-    from statsmodels.tsa.seasonal import seasonal_decompose
-    STATSMODELS_AVAILABLE = True
-except ImportError:
-    STATSMODELS_AVAILABLE = False
-
-try:
-    from tsfresh import extract_features
-    TSFRESH_AVAILABLE = True
-except ImportError:
-    TSFRESH_AVAILABLE = False
+import json
 
 logger = logging.getLogger(__name__)
 
 class TimeSeriesAnalyzer:
     """
-    Performs advanced time series analysis on data
+    Analyzes time series data for trends, patterns, and anomalies
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -70,11 +56,11 @@ class TimeSeriesAnalyzer:
             # Get data from the appropriate source
             data = self._get_data(data_source, parameters)
             
-            if data.empty:
+            if data is None or len(data) == 0:
                 return {"status": "error", "message": "No data available for analysis"}
             
-            # Perform the requested analysis
-            results = self._perform_analysis(data, analysis_type, parameters)
+            # Apply the requested analysis
+            results = self._apply_analysis(data, analysis_type, parameters)
             
             # Cache the results
             self._cache_analysis(cache_key, results)
@@ -103,9 +89,9 @@ class TimeSeriesAnalyzer:
             oldest_key = next(iter(self.analysis_cache))
             del self.analysis_cache[oldest_key]
     
-    def _parse_query(self, query: str) -> Tuple[str, str, Dict[str, Any]]:
+    def _parse_query(self, query: str) -> tuple:
         """
-        Parse a natural language query to determine the analysis needed
+        Parse a natural language query to determine analysis parameters
         
         Args:
             query: Natural language query
@@ -121,47 +107,45 @@ class TimeSeriesAnalyzer:
         parameters = {}
         
         # Determine analysis type
-        if "trend" in query or "pattern" in query:
+        if "trend" in query:
             analysis_type = "trend"
-        elif "decompose" in query or "breakdown" in query:
-            analysis_type = "decomposition"
+        elif "seasonal" in query or "decompos" in query:
+            analysis_type = "seasonal_decomposition"
         elif "anomaly" in query or "outlier" in query:
-            analysis_type = "anomaly"
-        elif "correlation" in query or "relationship" in query:
-            analysis_type = "correlation"
+            analysis_type = "anomaly_detection"
         elif "feature" in query or "extract" in query:
             analysis_type = "feature_extraction"
         
         # Determine data source
         if "database" in query or "db" in query:
             data_source = "database"
-        elif "csv" in query or "file" in query:
+        elif "file" in query or "csv" in query:
             data_source = "file"
-        elif "api" in query or "service" in query:
-            data_source = "api"
-        elif "sensor" in query or "iot" in query:
-            data_source = "sensor"
         
-        # Extract parameters
-        # Time window
-        window_match = re.search(r'last\s+(\d+)\s+(day|week|month|year)s?', query)
-        if window_match:
-            amount = int(window_match.group(1))
-            unit = window_match.group(2)
+        # Extract time window
+        time_window_match = re.search(r'(last|past)\s+(\d+)\s+(day|week|month|year)s?', query)
+        if time_window_match:
+            amount = int(time_window_match.group(2))
+            unit = time_window_match.group(3)
             
             if unit == "day":
-                parameters["window_days"] = amount
+                parameters["time_window"] = amount
             elif unit == "week":
-                parameters["window_days"] = amount * 7
+                parameters["time_window"] = amount * 7
             elif unit == "month":
-                parameters["window_days"] = amount * 30
+                parameters["time_window"] = amount * 30
             elif unit == "year":
-                parameters["window_days"] = amount * 365
+                parameters["time_window"] = amount * 365
         
-        # Specific field or metric
-        field_match = re.search(r'for\s+([a-zA-Z0-9_]+)', query)
-        if field_match:
-            parameters["field"] = field_match.group(1)
+        # Extract specific parameters
+        if "hourly" in query:
+            parameters["frequency"] = "H"
+        elif "daily" in query:
+            parameters["frequency"] = "D"
+        elif "weekly" in query:
+            parameters["frequency"] = "W"
+        elif "monthly" in query:
+            parameters["frequency"] = "M"
         
         return analysis_type, data_source, parameters
     
@@ -176,82 +160,132 @@ class TimeSeriesAnalyzer:
         Returns:
             Pandas DataFrame with time series data
         """
-        # For now, we'll just generate sample data
-        # In a real implementation, this would connect to databases, files, APIs, etc.
+        if data_source == "database" or data_source == "file":
+            # In a real implementation, this would connect to databases or files
+            # For now, just generate sample data
+            logger.info(f"Using sample data for {data_source} source")
+            return self._generate_sample_data(parameters)
+        else:
+            # Generate sample data
+            return self._generate_sample_data(parameters)
+    
+    def _generate_sample_data(self, parameters: Dict[str, Any]) -> pd.DataFrame:
+        """
+        Generate sample time series data for testing
+        
+        Args:
+            parameters: Data generation parameters
+            
+        Returns:
+            Pandas DataFrame with time series data
+        """
+        # Data parameters
+        days = parameters.get("time_window", self.window_size)
+        frequency = parameters.get("frequency", "D")
         
         # Generate date range
-        window_days = parameters.get("window_days", self.window_size)
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=window_days)
-        date_range = pd.date_range(start=start_date, end=end_date, freq=self.resample_frequency)
+        start_date = end_date - timedelta(days=days)
         
-        # Generate sample data
-        if data_source == "sensor" or data_source == "iot":
-            # More variable data for sensors
-            base = 100
-            trend = np.linspace(0, 20, len(date_range))
-            seasonality = 15 * np.sin(np.linspace(0, 4 * np.pi, len(date_range)))
-            noise = np.random.normal(0, 5, len(date_range))
-            values = base + trend + seasonality + noise
-            
-            # Add some anomalies
-            anomaly_indices = np.random.choice(range(len(date_range)), size=3, replace=False)
-            for idx in anomaly_indices:
-                values[idx] += np.random.choice([-50, 50])
-            
+        if frequency == "H":
+            periods = days * 24
+            freq = "H"
+        elif frequency == "D":
+            periods = days
+            freq = "D"
+        elif frequency == "W":
+            periods = days // 7 + 1
+            freq = "W"
+        elif frequency == "M":
+            periods = days // 30 + 1
+            freq = "M"
         else:
-            # More stable data for general time series
-            base = 500
-            trend = np.linspace(0, 50, len(date_range))
-            seasonality = 30 * np.sin(np.linspace(0, 2 * np.pi, len(date_range)))
-            noise = np.random.normal(0, 10, len(date_range))
-            values = base + trend + seasonality + noise
+            periods = days
+            freq = "D"
+        
+        dates = pd.date_range(start=start_date, periods=periods, freq=freq)
+        
+        # Generate trend component
+        trend = np.linspace(10, 15, num=len(dates))
+        
+        # Generate seasonal component (period depends on frequency)
+        if frequency == "H":
+            # Daily seasonality for hourly data
+            seasonal_period = 24
+        elif frequency == "D":
+            # Weekly seasonality for daily data
+            seasonal_period = 7
+        elif frequency == "W":
+            # Quarterly seasonality for weekly data
+            seasonal_period = 13
+        elif frequency == "M":
+            # Yearly seasonality for monthly data
+            seasonal_period = 12
+        else:
+            seasonal_period = 7
+        
+        t = np.arange(len(dates))
+        seasonal = 2 * np.sin(2 * np.pi * t / seasonal_period)
+        
+        # Generate random component
+        np.random.seed(42)  # For reproducibility
+        random = np.random.normal(0, 0.5, size=len(dates))
+        
+        # Combine components
+        values = trend + seasonal + random
         
         # Create DataFrame
-        df = pd.DataFrame({
-            'timestamp': date_range,
-            'value': values
-        })
+        df = pd.DataFrame({"value": values}, index=dates)
+        
+        # Add some anomalies
+        if len(df) > 5:
+            # Add a few spike anomalies
+            spike_indices = np.random.choice(len(df), size=2, replace=False)
+            for idx in spike_indices:
+                df.iloc[idx, 0] += 5 * np.random.choice([-1, 1])
+            
+            # Add a level shift anomaly
+            if len(df) > 10:
+                shift_start = len(df) // 2
+                shift_end = shift_start + 3
+                df.iloc[shift_start:shift_end, 0] += 3
         
         return df
     
-    def _perform_analysis(
+    def _apply_analysis(
         self, 
         data: pd.DataFrame, 
         analysis_type: str, 
         parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Perform the requested analysis on the data
+        Apply the requested analysis to the data
         
         Args:
             data: Time series data
-            analysis_type: Type of analysis to perform
+            analysis_type: Type of analysis to apply
             parameters: Analysis parameters
             
         Returns:
             Dictionary with analysis results
         """
-        # Set timestamp as index if it's not already
-        if 'timestamp' in data.columns:
-            data = data.set_index('timestamp')
-        
         if analysis_type == "trend":
             return self._analyze_trend(data, parameters)
-        elif analysis_type == "decomposition":
-            return self._decompose_time_series(data, parameters)
-        elif analysis_type == "anomaly":
-            return self._detect_anomalies(data, parameters)
-        elif analysis_type == "correlation":
-            return self._analyze_correlation(data, parameters)
+        elif analysis_type == "seasonal_decomposition":
+            return self._analyze_seasonal_decomposition(data, parameters)
+        elif analysis_type == "anomaly_detection":
+            return self._analyze_anomaly_detection(data, parameters)
         elif analysis_type == "feature_extraction":
-            return self._extract_features(data, parameters)
+            return self._analyze_feature_extraction(data, parameters)
         else:
-            return {"status": "error", "message": f"Unknown analysis type: {analysis_type}"}
+            return {
+                "status": "error",
+                "message": f"Unknown analysis type: {analysis_type}"
+            }
     
     def _analyze_trend(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze the trend in time series data
+        Analyze trend in time series data
         
         Args:
             data: Time series data
@@ -260,67 +294,70 @@ class TimeSeriesAnalyzer:
         Returns:
             Dictionary with trend analysis results
         """
-        # Select the field to analyze
-        field = parameters.get("field", "value")
-        if field not in data.columns and data.index.name != field:
-            field = data.columns[0]
-        
-        series = data[field] if field in data.columns else data.iloc[:, 0]
-        
-        # Calculate basic statistics
-        stats = {
-            "mean": series.mean(),
-            "std": series.std(),
-            "min": series.min(),
-            "max": series.max(),
-            "median": series.median()
-        }
-        
-        # Calculate moving averages
-        window_short = max(3, len(series) // 10)
-        window_long = max(7, len(series) // 5)
-        
-        ma_short = series.rolling(window=window_short).mean()
-        ma_long = series.rolling(window=window_long).mean()
-        
-        # Determine overall trend
-        overall_trend = "up" if series.iloc[-1] > series.iloc[0] else "down"
-        
-        # Calculate percentage change
-        pct_change = ((series.iloc[-1] - series.iloc[0]) / series.iloc[0]) * 100
-        
-        # Prepare time series data for visualization
-        # Convert the time series to a format suitable for JSON serialization
-        time_data = []
-        for timestamp, value in zip(series.index, series.values):
-            time_data.append({
-                "timestamp": timestamp.isoformat(),
-                "value": float(value),
-                "ma_short": float(ma_short.get(timestamp, 0)) if not pd.isna(ma_short.get(timestamp, 0)) else None,
-                "ma_long": float(ma_long.get(timestamp, 0)) if not pd.isna(ma_long.get(timestamp, 0)) else None
-            })
-        
-        return {
-            "status": "success",
-            "analysis_type": "trend",
-            "field": field,
-            "stats": stats,
-            "trend": {
-                "direction": overall_trend,
-                "percent_change": pct_change,
-                "start_value": float(series.iloc[0]),
-                "end_value": float(series.iloc[-1])
-            },
-            "moving_averages": {
-                "short_window": window_short,
-                "long_window": window_long
-            },
-            "time_series": time_data
-        }
+        try:
+            # Extract the time series
+            if isinstance(data, pd.DataFrame):
+                series = data.iloc[:, 0]
+            else:
+                series = data
+            
+            # Calculate basic trend metrics
+            start_value = float(series.iloc[0])
+            end_value = float(series.iloc[-1])
+            
+            percent_change = ((end_value - start_value) / start_value) * 100 if start_value != 0 else 0
+            
+            # Determine trend direction
+            if percent_change > 3:
+                direction = "increasing"
+            elif percent_change < -3:
+                direction = "decreasing"
+            else:
+                direction = "stable"
+            
+            # Prepare data for response (convert to list of time, value points)
+            time_series_data = []
+            for idx, value in enumerate(series):
+                time_series_data.append({
+                    "time": series.index[idx].isoformat(),
+                    "value": float(value)
+                })
+            
+            # Prepare trend data
+            trend_data = {
+                "direction": direction,
+                "start_value": start_value,
+                "end_value": end_value,
+                "percent_change": percent_change
+            }
+            
+            # Calculate statistics
+            stats = {
+                "mean": float(series.mean()),
+                "std": float(series.std()),
+                "min": float(series.min()),
+                "max": float(series.max()),
+                "median": float(series.median())
+            }
+            
+            return {
+                "status": "success",
+                "analysis_type": "trend",
+                "time_series": time_series_data,
+                "trend": trend_data,
+                "stats": stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing trend: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error analyzing trend: {str(e)}"
+            }
     
-    def _decompose_time_series(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_seasonal_decomposition(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Decompose time series into trend, seasonal, and residual components
+        Perform seasonal decomposition of time series data
         
         Args:
             data: Time series data
@@ -329,83 +366,84 @@ class TimeSeriesAnalyzer:
         Returns:
             Dictionary with decomposition results
         """
-        if not STATSMODELS_AVAILABLE:
-            return {
-                "status": "error",
-                "message": "Seasonal decomposition requires statsmodels package"
-            }
-        
-        # Select the field to analyze
-        field = parameters.get("field", "value")
-        if field not in data.columns and data.index.name != field:
-            field = data.columns[0]
-        
-        series = data[field] if field in data.columns else data.iloc[:, 0]
-        
-        # Ensure the series is regular
-        if not isinstance(series.index, pd.DatetimeIndex):
-            return {
-                "status": "error",
-                "message": "Decomposition requires datetime index"
-            }
-        
-        # Decompose the time series
         try:
-            # Determine period automatically if not specified
-            period = parameters.get("period")
-            if not period:
-                # Try to infer from frequency
-                if series.index.freq:
-                    if series.index.freq.name == 'D':
-                        period = 7  # Weekly seasonality
-                    elif series.index.freq.name == 'M':
-                        period = 12  # Yearly seasonality
-                    elif series.index.freq.name == 'H':
-                        period = 24  # Daily seasonality
-                    else:
-                        period = 12  # Default
-                else:
-                    # Default to 12 if can't determine
-                    period = 12
+            from statsmodels.tsa.seasonal import seasonal_decompose
             
-            decomposition = seasonal_decompose(
-                series, 
-                model=self.decomposition_method,
-                period=period
-            )
+            # Extract the time series
+            if isinstance(data, pd.DataFrame):
+                series = data.iloc[:, 0]
+            else:
+                series = data
             
-            # Prepare components for visualization
+            # Determine the period based on the data frequency
+            if len(series) >= 24 and series.index.freq == 'H':
+                period = 24  # Daily cycle for hourly data
+            elif len(series) >= 7 and series.index.freq == 'D':
+                period = 7   # Weekly cycle for daily data
+            elif len(series) >= 12 and series.index.freq == 'M':
+                period = 12  # Yearly cycle for monthly data
+            else:
+                # Default to 7 if we can't determine or if it's too short
+                period = min(7, len(series) // 2)
+            
+            # Ensure period is at least 2 and not larger than the series length
+            period = max(2, min(period, len(series) // 2))
+            
+            # Apply decomposition
+            model = parameters.get("decomposition_method", self.decomposition_method)
+            result = seasonal_decompose(series, model=model, period=period)
+            
+            # Prepare data for response
             components = {}
-            for component_name in ["trend", "seasonal", "resid"]:
-                component_series = getattr(decomposition, component_name)
-                component_data = []
-                
-                for timestamp, value in zip(component_series.index, component_series.values):
-                    if not pd.isna(value):
-                        component_data.append({
-                            "timestamp": timestamp.isoformat(),
-                            "value": float(value)
-                        })
-                
-                components[component_name] = component_data
+            
+            # Original series
+            components["original"] = []
+            for idx, value in enumerate(series):
+                components["original"].append({
+                    "time": series.index[idx].isoformat(),
+                    "value": float(value)
+                })
+            
+            # Trend component
+            components["trend"] = []
+            for idx, value in enumerate(result.trend.dropna()):
+                components["trend"].append({
+                    "time": result.trend.dropna().index[idx].isoformat(),
+                    "value": float(value)
+                })
+            
+            # Seasonal component
+            components["seasonal"] = []
+            for idx, value in enumerate(result.seasonal.dropna()):
+                components["seasonal"].append({
+                    "time": result.seasonal.dropna().index[idx].isoformat(),
+                    "value": float(value)
+                })
+            
+            # Residual component
+            components["residual"] = []
+            for idx, value in enumerate(result.resid.dropna()):
+                components["residual"].append({
+                    "time": result.resid.dropna().index[idx].isoformat(),
+                    "value": float(value)
+                })
             
             return {
                 "status": "success",
-                "analysis_type": "decomposition",
-                "field": field,
-                "method": self.decomposition_method,
+                "analysis_type": "seasonal_decomposition",
+                "components": components,
                 "period": period,
-                "components": components
+                "model": model
             }
             
         except Exception as e:
-            logger.error(f"Error decomposing time series: {str(e)}")
+            logger.error(f"Error in seasonal decomposition: {str(e)}")
             return {
                 "status": "error",
-                "message": f"Error decomposing time series: {str(e)}"
+                "message": f"Error in seasonal decomposition: {str(e)}"
             }
     
-    def _detect_anomalies(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_anomaly_detection(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Detect anomalies in time series data
         
@@ -416,104 +454,61 @@ class TimeSeriesAnalyzer:
         Returns:
             Dictionary with anomaly detection results
         """
-        # Select the field to analyze
-        field = parameters.get("field", "value")
-        if field not in data.columns and data.index.name != field:
-            field = data.columns[0]
-        
-        series = data[field] if field in data.columns else data.iloc[:, 0]
-        
-        # Simple anomaly detection using mean and standard deviation
-        # More sophisticated methods would be used in a real system
-        mean = series.mean()
-        std = series.std()
-        threshold = parameters.get("threshold", 3.0)  # Default to 3 standard deviations
-        
-        upper_bound = mean + (threshold * std)
-        lower_bound = mean - (threshold * std)
-        
-        # Find anomalies
-        anomalies = []
-        for timestamp, value in zip(series.index, series.values):
-            if value > upper_bound or value < lower_bound:
-                anomalies.append({
-                    "timestamp": timestamp.isoformat(),
-                    "value": float(value),
-                    "deviation": (value - mean) / std
+        try:
+            # Extract the time series
+            if isinstance(data, pd.DataFrame):
+                series = data.iloc[:, 0]
+            else:
+                series = data
+            
+            # Simple anomaly detection using mean and standard deviation
+            threshold = parameters.get("threshold", 2.0)  # Default: 2 standard deviations
+            
+            mean = series.mean()
+            std = series.std()
+            
+            lower_bound = mean - threshold * std
+            upper_bound = mean + threshold * std
+            
+            # Find anomalies
+            anomalies = series[(series < lower_bound) | (series > upper_bound)]
+            
+            # Prepare data for response
+            time_series_data = []
+            for idx, value in enumerate(series):
+                time_series_data.append({
+                    "time": series.index[idx].isoformat(),
+                    "value": float(value)
                 })
-        
-        # Prepare time series data for visualization
-        time_data = []
-        for timestamp, value in zip(series.index, series.values):
-            time_data.append({
-                "timestamp": timestamp.isoformat(),
-                "value": float(value),
-                "upper_bound": float(upper_bound),
-                "lower_bound": float(lower_bound),
-                "is_anomaly": value > upper_bound or value < lower_bound
-            })
-        
-        return {
-            "status": "success",
-            "analysis_type": "anomaly_detection",
-            "field": field,
-            "threshold": threshold,
-            "anomalies": {
-                "count": len(anomalies),
-                "items": anomalies
-            },
-            "stats": {
+            
+            anomaly_data = []
+            for idx, value in enumerate(anomalies):
+                anomaly_data.append({
+                    "time": anomalies.index[idx].isoformat(),
+                    "value": float(value),
+                    "deviation": float((value - mean) / std)
+                })
+            
+            return {
+                "status": "success",
+                "analysis_type": "anomaly_detection",
+                "time_series": time_series_data,
+                "anomalies": anomaly_data,
+                "threshold": threshold,
                 "mean": float(mean),
                 "std": float(std),
-                "upper_bound": float(upper_bound),
-                "lower_bound": float(lower_bound)
-            },
-            "time_series": time_data
-        }
-    
-    def _analyze_correlation(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Analyze correlation between fields in the data
-        
-        Args:
-            data: Time series data
-            parameters: Analysis parameters
+                "lower_bound": float(lower_bound),
+                "upper_bound": float(upper_bound)
+            }
             
-        Returns:
-            Dictionary with correlation analysis results
-        """
-        # Need at least 2 columns for correlation
-        if len(data.columns) < 2:
+        except Exception as e:
+            logger.error(f"Error detecting anomalies: {str(e)}")
             return {
                 "status": "error",
-                "message": "Correlation analysis requires at least 2 data columns"
+                "message": f"Error detecting anomalies: {str(e)}"
             }
-        
-        # Calculate correlation matrix
-        corr_matrix = data.corr()
-        
-        # Convert to list format for easier JSON serialization
-        correlations = []
-        for col1 in corr_matrix.columns:
-            for col2 in corr_matrix.columns:
-                if col1 != col2:
-                    correlations.append({
-                        "field1": col1,
-                        "field2": col2,
-                        "correlation": float(corr_matrix.loc[col1, col2])
-                    })
-        
-        # Sort by absolute correlation value
-        correlations.sort(key=lambda x: abs(x["correlation"]), reverse=True)
-        
-        return {
-            "status": "success",
-            "analysis_type": "correlation",
-            "correlations": correlations,
-            "fields": list(data.columns)
-        }
     
-    def _extract_features(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_feature_extraction(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extract features from time series data
         
@@ -524,105 +519,63 @@ class TimeSeriesAnalyzer:
         Returns:
             Dictionary with feature extraction results
         """
-        if not TSFRESH_AVAILABLE:
-            # Fallback to basic feature extraction
-            return self._basic_feature_extraction(data, parameters)
-        
         try:
-            # Select the field to analyze
-            field = parameters.get("field", "value")
-            if field not in data.columns and data.index.name != field:
-                field = data.columns[0]
-            
-            series = data[field] if field in data.columns else data.iloc[:, 0]
-            
-            # Prepare data for tsfresh
-            df_for_extraction = pd.DataFrame({
-                'id': 0,
-                'time': range(len(series)),
-                'value': series.values
-            })
+            # Extract the time series
+            if isinstance(data, pd.DataFrame):
+                series = data.iloc[:, 0]
+            else:
+                series = data
             
             # Extract features
-            features = extract_features(df_for_extraction, column_id='id', column_sort='time')
+            features = {}
             
-            # Convert to a more readable format
-            feature_list = []
-            for feature_name, value in features.iloc[0].items():
-                if not pd.isna(value):
-                    feature_list.append({
-                        "name": feature_name,
-                        "value": float(value)
-                    })
+            # Statistical features
+            features["mean"] = float(series.mean())
+            features["std"] = float(series.std())
+            features["min"] = float(series.min())
+            features["max"] = float(series.max())
+            features["median"] = float(series.median())
+            features["range"] = float(series.max() - series.min())
             
-            # Sort by feature name
-            feature_list.sort(key=lambda x: x["name"])
+            # Trend features
+            features["start_value"] = float(series.iloc[0])
+            features["end_value"] = float(series.iloc[-1])
+            features["percent_change"] = float(((series.iloc[-1] - series.iloc[0]) / series.iloc[0]) * 100) if series.iloc[0] != 0 else 0
+            
+            # Volatility features
+            features["variance"] = float(series.var())
+            features["skewness"] = float(series.skew())
+            features["kurtosis"] = float(series.kurtosis())
+            
+            # Autocorrelation (lag 1)
+            try:
+                import scipy.stats as stats
+                acf_lag1 = series.autocorr(lag=1)
+                features["autocorrelation_lag1"] = float(acf_lag1) if not np.isnan(acf_lag1) else 0
+            except:
+                features["autocorrelation_lag1"] = 0
+            
+            # Prepare data for response
+            time_series_data = []
+            for idx, value in enumerate(series):
+                time_series_data.append({
+                    "time": series.index[idx].isoformat(),
+                    "value": float(value)
+                })
             
             return {
                 "status": "success",
                 "analysis_type": "feature_extraction",
-                "field": field,
-                "features": feature_list,
-                "count": len(feature_list)
+                "time_series": time_series_data,
+                "features": features
             }
             
         except Exception as e:
             logger.error(f"Error extracting features: {str(e)}")
-            return self._basic_feature_extraction(data, parameters)
-    
-    def _basic_feature_extraction(self, data: pd.DataFrame, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Basic feature extraction when tsfresh is not available
-        
-        Args:
-            data: Time series data
-            parameters: Analysis parameters
-            
-        Returns:
-            Dictionary with basic feature extraction results
-        """
-        # Select the field to analyze
-        field = parameters.get("field", "value")
-        if field not in data.columns and data.index.name != field:
-            field = data.columns[0]
-        
-        series = data[field] if field in data.columns else data.iloc[:, 0]
-        
-        # Calculate basic statistical features
-        features = [
-            {"name": "mean", "value": float(series.mean())},
-            {"name": "std", "value": float(series.std())},
-            {"name": "min", "value": float(series.min())},
-            {"name": "max", "value": float(series.max())},
-            {"name": "median", "value": float(series.median())},
-            {"name": "range", "value": float(series.max() - series.min())},
-            {"name": "iqr", "value": float(series.quantile(0.75) - series.quantile(0.25))},
-            {"name": "skewness", "value": float(series.skew())},
-            {"name": "kurtosis", "value": float(series.kurtosis())},
-            {"name": "count", "value": float(len(series))},
-            {"name": "sum", "value": float(series.sum())}
-        ]
-        
-        # Add autocorrelation if available
-        if STATSMODELS_AVAILABLE:
-            try:
-                acf = sm.tsa.acf(series, nlags=10)
-                for i, val in enumerate(acf):
-                    features.append({
-                        "name": f"autocorrelation_lag_{i}",
-                        "value": float(val)
-                    })
-            except:
-                pass
-        
-        return {
-            "status": "success",
-            "analysis_type": "feature_extraction",
-            "field": field,
-            "features": features,
-            "count": len(features),
-            "note": "Basic feature extraction (tsfresh not available)"
-        }
+            return {
+                "status": "error",
+                "message": f"Error extracting features: {str(e)}"
+            }
     
     def get_status(self) -> Dict[str, Any]:
         """
@@ -635,8 +588,5 @@ class TimeSeriesAnalyzer:
             "window_size": self.window_size,
             "resample_frequency": self.resample_frequency,
             "decomposition_method": self.decomposition_method,
-            "cache_size": len(self.analysis_cache),
-            "max_cache_size": self.max_cache_size,
-            "statsmodels_available": STATSMODELS_AVAILABLE,
-            "tsfresh_available": TSFRESH_AVAILABLE
+            "cached_analyses": len(self.analysis_cache)
         }

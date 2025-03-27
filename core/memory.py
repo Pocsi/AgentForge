@@ -1,16 +1,12 @@
 import logging
-from typing import List, Dict, Any, Tuple, Optional
-from collections import deque
-import time
+from typing import Dict, Any, List, Optional
 from datetime import datetime
-from core.compression import TextCompressor
 
 logger = logging.getLogger(__name__)
 
 class MemoryManager:
     """
-    Manages the agent's memory, including conversation history
-    and compression capabilities
+    Manages chat history and memory for the AI Companion
     """
     
     def __init__(self, max_size: int = 50):
@@ -21,161 +17,97 @@ class MemoryManager:
             max_size: Maximum number of messages to store
         """
         self.max_size = max_size
-        self.messages = deque(maxlen=max_size)
-        self.last_compression_time = time.time()
-        self.compression_interval = 3600  # 1 hour
+        self.messages = []
+        self.last_compression = None
         
         logger.info(f"Memory manager initialized with max size {max_size}")
     
-    def add_user_message(self, message: str) -> None:
-        """
-        Add a user message to memory
-        
-        Args:
-            message: User message
-        """
-        self._add_message("user", message)
-    
-    def add_agent_message(self, message: str) -> None:
-        """
-        Add an agent message to memory
-        
-        Args:
-            message: Agent message
-        """
-        self._add_message("agent", message)
-    
-    def _add_message(self, role: str, content: str) -> None:
+    def add_message(self, message: Dict[str, Any]) -> None:
         """
         Add a message to memory
         
         Args:
-            role: Message role (user or agent)
-            content: Message content
+            message: Message to add
         """
-        message = {
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat()
-        }
         self.messages.append(message)
-    
-    def get_all_messages(self) -> List[Dict[str, Any]]:
-        """
-        Get all messages in memory
         
-        Returns:
-            List of all messages
-        """
-        return list(self.messages)
+        # Trim if necessary
+        if len(self.messages) > self.max_size:
+            self._trim_memory()
     
-    def get_recent_messages(self, n: int) -> List[Dict[str, Any]]:
+    def _trim_memory(self) -> None:
+        """Trim memory to max size by removing oldest messages"""
+        excess = len(self.messages) - self.max_size
+        if excess > 0:
+            self.messages = self.messages[excess:]
+    
+    def get_messages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Get the n most recent messages
+        Get recent messages
         
         Args:
-            n: Number of messages to retrieve
+            limit: Maximum number of messages to return (most recent)
             
         Returns:
-            List of recent messages
+            List of messages
         """
-        return list(self.messages)[-n:] if n < len(self.messages) else list(self.messages)
+        if limit and limit < len(self.messages):
+            return self.messages[-limit:]
+        return self.messages
     
-    def clear_memory(self) -> None:
+    def clear(self) -> None:
         """Clear all messages from memory"""
-        self.messages.clear()
-        logger.info("Memory cleared")
-    
-    def resize(self, new_size: int) -> None:
-        """
-        Resize the memory
-        
-        Args:
-            new_size: New maximum size
-        """
-        if new_size <= 0:
-            logger.warning(f"Invalid memory size: {new_size}, must be positive")
-            return
-            
-        # Create a new deque with the new size
-        old_messages = list(self.messages)
-        self.messages = deque(old_messages[-new_size:] if new_size < len(old_messages) else old_messages, maxlen=new_size)
-        self.max_size = new_size
-        
-        logger.info(f"Memory resized to {new_size}")
+        self.messages = []
     
     def should_compress(self) -> bool:
         """
-        Check if memory should be compressed based on time or size
+        Check if memory should be compressed
         
         Returns:
-            True if compression is recommended, False otherwise
+            True if compression is needed, False otherwise
         """
-        # Check if enough time has passed since last compression
-        time_based = (time.time() - self.last_compression_time) > self.compression_interval
-        
-        # Check if we're using more than 80% of capacity
-        size_based = len(self.messages) > (self.max_size * 0.8)
-        
-        return time_based or size_based
+        # Check if we're at 80% capacity
+        return len(self.messages) >= int(0.8 * self.max_size)
     
-    def compress_memory(self, compressor: TextCompressor) -> None:
+    def compress(self, compressor) -> None:
         """
-        Compress memory to save space
+        Compress memory using the provided compressor
         
         Args:
-            compressor: Text compressor to use
+            compressor: Text compressor object
         """
-        if len(self.messages) < 10:
-            # Not enough messages to compress
+        if not self.messages:
             return
         
-        try:
-            # Get user-agent conversation pairs
-            conversation_pairs = []
-            current_pair = {}
-            
-            for msg in list(self.messages)[:-5]:  # Keep the most recent 5 messages uncompressed
-                if msg["role"] == "user":
-                    current_pair = {"user": msg["content"]}
-                elif msg["role"] == "agent" and "user" in current_pair:
-                    current_pair["agent"] = msg["content"]
-                    conversation_pairs.append(current_pair)
-                    current_pair = {}
-            
-            # Compress conversation pairs
-            if conversation_pairs:
-                compressed_summary = compressor.compress_conversations(conversation_pairs)
-                
-                # Replace the old messages with the compressed summary
-                old_messages = list(self.messages)
-                recent_messages = old_messages[-5:]  # Keep the 5 most recent messages
-                
-                self.messages.clear()
-                
-                # Add the compressed summary as a system message
-                self._add_message("system", f"MEMORY SUMMARY: {compressed_summary}")
-                
-                # Add back the recent messages
-                for msg in recent_messages:
-                    self.messages.append(msg)
-                
-                self.last_compression_time = time.time()
-                logger.info(f"Memory compressed, {len(conversation_pairs)} conversation pairs summarized")
+        # Only compress user messages for now
+        user_messages = [msg for msg in self.messages if msg.get("role") == "user"]
         
-        except Exception as e:
-            logger.error(f"Error compressing memory: {str(e)}")
-    
-    def get_usage_stats(self) -> Dict[str, Any]:
-        """
-        Get memory usage statistics
-        
-        Returns:
-            Dictionary of usage statistics
-        """
-        return {
-            "current_size": len(self.messages),
-            "max_size": self.max_size,
-            "usage_percentage": (len(self.messages) / self.max_size) * 100 if self.max_size > 0 else 0,
-            "last_compression": datetime.fromtimestamp(self.last_compression_time).isoformat() if self.last_compression_time else None
-        }
+        if len(user_messages) > 3:
+            # Get text from messages
+            texts = [msg.get("content", "") for msg in user_messages[:-2]]
+            
+            # Compress
+            compressed_text = compressor.compress_text("\n".join(texts))
+            
+            # Create a new compressed message
+            compressed_message = {
+                "role": "system",
+                "content": compressed_text,
+                "timestamp": datetime.now().isoformat(),
+                "compressed": True,
+                "original_count": len(texts)
+            }
+            
+            # Replace the old messages with the compressed one
+            # Keep the most recent messages
+            new_messages = [msg for msg in self.messages if msg.get("role") != "user" or msg in user_messages[-2:]]
+            
+            # Insert compressed message at the beginning
+            new_messages.insert(0, compressed_message)
+            
+            self.messages = new_messages
+            self.last_compression = datetime.now()
+            
+            logger.info(f"Compressed {len(texts)} messages into one")
+        else:
+            logger.info("Not enough messages to compress")
