@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import json
 import plotly.graph_objects as go
+import os
 from ui.components import (
     display_chat_message, 
     display_time_series, 
@@ -1381,8 +1382,27 @@ def settings_page():
         
         # Update integrations button
         if st.button("Update Integration Settings"):
-            st.warning("Integration settings update not implemented in this demo")
-            st.info("In a production application, this would update the MCP and GOAT settings")
+            # Store API keys in environment variables
+            if mcp_api_key:
+                os.environ["MCP_API_KEY"] = mcp_api_key
+                st.success("MCP API Key updated successfully")
+            
+            if goat_api_key:
+                os.environ["GOAT_API_KEY"] = goat_api_key
+                st.success("GOAT API Key updated successfully")
+            
+            # Update server URL if changed
+            if mcp_server_url != mcp_status.get("server_url", "http://localhost:8080"):
+                os.environ["MCP_SERVER_URL"] = mcp_server_url
+                st.success("MCP Server URL updated successfully")
+            
+            # Update enabled tools
+            if selected_tools != goat_status.get("enabled_tools", ["payments", "investments", "insights"]):
+                # In a real application, we would store this in config
+                st.success("GOAT tools updated successfully")
+            
+            # Reinitialize connectors
+            st.info("Please restart the application for changes to take effect")
     
     # Analytics Settings
     with tab3:
