@@ -1,0 +1,69 @@
+# Core dependencies
+python-dotenv==1.1.0
+pandas==2.2.1
+numpy==2.1.3
+networkx==3.4.2
+scikit-learn==1.6.1
+tensorflow==2.19.0
+psutil==7.0.0
+scipy==1.15.2
+
+# Edge Computing Databases
+influxdb-client==1.36.1
+timescaledb==2.12.0
+questdb==1.0.0
+
+# Stream Processing
+kafka-python==2.0.2
+apache-flink==1.18.0
+
+# Edge Computing Frameworks
+edgex-foundry==2.3.0
+k3s==0.1.0
+openedge==1.0.0
+
+# Real-time Analytics
+grafana-api-client==1.0.0
+prometheus-client==0.19.0
+elasticsearch==8.11.0
+
+# Machine Learning
+tensorflow-lite==2.19.0
+pytorch-mobile==2.1.0
+onnx-runtime==1.16.3
+
+# Network Optimization
+istio-client==1.0.0
+envoy-client==1.0.0
+haproxy-client==1.0.0
+
+# Data Processing
+apache-arrow==14.0.1
+pyarrow==14.0.1
+delta-lake==3.0.0
+
+# Monitoring
+datadog==0.47.0
+newrelic==8.8.0
+splunk-sdk==1.7.0
+
+# Security
+hvac==1.2.0
+python-consul2==0.1.5
+wireguard==0.1.0
+
+# Integration Tools
+apache-nifi==1.0.0
+apache-airflow==2.7.1
+luigi==3.3.0
+
+# Additional Dependencies
+requests==2.31.0
+websockets==12.0
+aiohttp==3.9.1
+pydantic==2.5.2
+fastapi==0.109.0
+uvicorn==0.27.0
+python-jose==3.3.0
+passlib==1.7.4
+python-multipart==0.0.6 

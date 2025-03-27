@@ -1,0 +1,75 @@
+{
+    "timescale_host": "localhost",
+    "timescale_port": 5432,
+    "timescale_db": "market_data",
+    
+    "influx_url": "http://localhost:8086",
+    "influx_token": "your_influx_token",
+    "influx_org": "market_org",
+    
+    "quest_host": "localhost",
+    "quest_port": 9009,
+    
+    "kafka_servers": ["localhost:9092"],
+    "flink_url": "http://localhost:8081",
+    
+    "edgex_core_data": "http://localhost:59880/api/v2/core-data",
+    "edgex_core_metadata": "http://localhost:59881/api/v2/core-metadata",
+    "k3s_url": "http://localhost:6443",
+    "openedge_url": "http://localhost:8080",
+    
+    "grafana_url": "http://localhost:3000",
+    "grafana_api_key": "your_grafana_api_key",
+    "prometheus_url": "http://localhost:9090",
+    "elasticsearch_hosts": ["http://localhost:9200"],
+    
+    "tflite_model_path": "models/tflite/model.tflite",
+    "pytorch_model_path": "models/pytorch/model.pt",
+    "onnx_model_path": "models/onnx/model.onnx",
+    
+    "istio_url": "http://localhost:15020",
+    "envoy_url": "http://localhost:15000",
+    "haproxy_url": "http://localhost:8404",
+    
+    "datadog_api_key": "your_datadog_api_key",
+    "newrelic_api_key": "your_newrelic_api_key",
+    "splunk_url": "http://localhost:8089",
+    "splunk_username": "admin",
+    "splunk_password": "your_splunk_password",
+    
+    "vault_url": "http://localhost:8200",
+    "vault_token": "your_vault_token",
+    "consul_host": "localhost",
+    "consul_port": 8500,
+    "wireguard_config": "/etc/wireguard/wg0.conf",
+    
+    "nifi_url": "http://localhost:8080/nifi-api",
+    "airflow_url": "http://localhost:8080",
+    "luigi_url": "http://localhost:8082",
+    
+    "performance_thresholds": {
+        "data_processing_time": 0.1,
+        "model_inference_time": 0.05,
+        "network_latency": 0.02,
+        "resource_usage": 0.8
+    },
+    
+    "ml_model_weights": {
+        "tflite": 0.4,
+        "pytorch": 0.3,
+        "onnx": 0.3
+    },
+    
+    "security_settings": {
+        "encryption_algorithm": "AES-256",
+        "hash_algorithm": "SHA-256",
+        "token_expiry": 3600,
+        "max_retries": 3
+    },
+    
+    "monitoring_settings": {
+        "metrics_interval": 60,
+        "alert_threshold": 0.9,
+        "retention_period": 30
+    }
+} 
