@@ -10,7 +10,7 @@ from integrations.mcp_connector import MCPConnector
 from integrations.goat_connector import GOATConnector
 from analytics.time_series import TimeSeriesAnalyzer
 from analytics.forecasting import Forecaster
-from signal.processor import SignalProcessor
+from signal_processing.processor import SignalProcessor
 from ui.components import sidebar, header, footer
 from ui.pages import (
     dashboard_page,

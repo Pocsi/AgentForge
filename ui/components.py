@@ -1,415 +1,294 @@
 import streamlit as st
-import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime
-import json
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 def sidebar():
-    """
-    Display the application sidebar with navigation and settings
-    """
+    """Render the sidebar with navigation"""
     with st.sidebar:
         st.title("AI Companion")
-        
-        # Profile section
-        st.subheader("Profile")
-        if st.session_state.agent:
-            st.write(f"**Name:** {st.session_state.agent.name}")
-            st.write(f"**Personality:** {st.session_state.agent.personality}")
-        else:
-            st.write("Agent not initialized")
-        
-        st.markdown("---")
         
         # Navigation
         st.subheader("Navigation")
         
-        # Define the pages
-        pages = {
-            "conversation": "💬 Conversation",
-            "dashboard": "📊 Dashboard",
-            "analytics": "📈 Analytics",
-            "signal": "📡 Signal Processing",
-            "settings": "⚙️ Settings"
-        }
+        # Use buttons for navigation
+        if st.button("💬 Conversation", use_container_width=True):
+            st.session_state.current_page = "conversation"
+            st.rerun()
+            
+        if st.button("📊 Dashboard", use_container_width=True):
+            st.session_state.current_page = "dashboard"
+            st.rerun()
+            
+        if st.button("📈 Analytics", use_container_width=True):
+            st.session_state.current_page = "analytics"
+            st.rerun()
+            
+        if st.button("🔊 Signal Processing", use_container_width=True):
+            st.session_state.current_page = "signal"
+            st.rerun()
+            
+        if st.button("⚙️ Settings", use_container_width=True):
+            st.session_state.current_page = "settings"
+            st.rerun()
         
-        # Create navigation buttons
-        for page_id, page_name in pages.items():
-            if st.button(page_name, key=f"nav_{page_id}"):
-                st.session_state.current_page = page_id
-                st.rerun()
-        
+        # System status indicator
         st.markdown("---")
+        st.subheader("System Status")
         
-        # Connection status
-        st.subheader("Component Status")
-        
-        if st.session_state.agent:
-            agent_state = st.session_state.agent.get_agent_state()
-            components = agent_state.get("components", {})
+        if st.session_state.is_initialized:
+            st.success("All systems operational")
             
-            # Display status of major components
-            mcp_status = components.get("mcp", {})
-            mcp_connected = mcp_status.get("connected", False)
-            st.write(f"MCP: {'✅' if mcp_connected else '❌'}")
-            
-            goat_status = components.get("goat", {})
-            goat_initialized = goat_status.get("initialized", False)
-            st.write(f"GOAT: {'✅' if goat_initialized else '❌'}")
-            
-            # Distributed compute status
-            dc_status = components.get("distributed_compute", {})
-            dc_engine = dc_status.get("engine", "none")
-            if dc_engine != "none":
-                st.write(f"Compute: ✅ ({dc_engine})")
-            else:
-                st.write("Compute: ❌")
-            
-            # Memory usage
-            if "memory_usage" in agent_state:
-                memory = agent_state["memory_usage"]
-                st.progress(memory["usage_percentage"] / 100, 
-                            f"Memory: {memory['current_size']}/{memory['max_size']}")
-        
-        st.markdown("---")
-        
-        # Footer
-        st.caption("© 2025 AI Companion")
-        st.caption("Version 1.0.0")
+            # Show some basic metrics if agent is initialized
+            if st.session_state.agent:
+                agent_state = st.session_state.agent.get_agent_state()
+                memory_usage = agent_state.get("memory_usage", {})
+                
+                if memory_usage:
+                    memory_percent = memory_usage.get("usage_percentage", 0)
+                    st.caption(f"Memory: {memory_percent}%")
+                    
+                components = agent_state.get("components", {})
+                
+                # MCP Status
+                mcp_status = components.get("mcp", {})
+                if mcp_status.get("connected", False):
+                    st.caption("MCP: Connected")
+                else:
+                    st.caption("MCP: Disconnected")
+                
+                # Distributed status
+                dc_status = components.get("distributed_compute", {})
+                if dc_status.get("enabled", False):
+                    workers = dc_status.get("connected_workers", 0)
+                    st.caption(f"Distributed: {workers} workers")
+                else:
+                    st.caption("Distributed: Local only")
+        else:
+            st.error("System not initialized")
+            if st.button("Initialize"):
+                with st.spinner("Initializing..."):
+                    st.session_state.is_initialized = False  # Reset to trigger initialization
+                    st.rerun()
 
 def header():
-    """
-    Display the application header
-    """
-    # Simple clean header
-    st.markdown(
-        """
-        <style>
-        .header-container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 1rem;
-        }
-        </style>
-        """, 
-        unsafe_allow_html=True
-    )
+    """Render the application header"""
+    current_page = st.session_state.current_page.capitalize()
+    st.title(f"{current_page}")
     
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        if st.session_state.current_page == "conversation":
-            st.title("AI Companion")
-        elif st.session_state.current_page == "dashboard":
-            st.title("System Dashboard")
-        elif st.session_state.current_page == "analytics":
-            st.title("Time Series Analytics")
-        elif st.session_state.current_page == "signal":
-            st.title("Signal Processing")
-        elif st.session_state.current_page == "settings":
-            st.title("Settings")
-    
-    with col2:
-        current_time = datetime.now().strftime("%H:%M:%S")
-        st.write(f"Time: {current_time}")
+    # Current time display
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.caption(f"Current time: {current_time}")
 
 def footer():
-    """
-    Display the application footer
-    """
+    """Render the application footer"""
     st.markdown("---")
-    st.caption("AI Companion powered by MCP and GOAT")
+    st.caption("AI Companion - High Agency Partner for Advanced Analytics, Signal Processing, and Time Series Forecasting")
 
-def display_chat_message(message, is_user=True):
-    """
-    Display a chat message with appropriate styling
-    
-    Args:
-        message: Message content
-        is_user: Whether the message is from the user (True) or agent (False)
-    """
+def display_chat_message(message: str, is_user: bool):
+    """Display a chat message with the appropriate styling"""
     if is_user:
-        st.markdown(
-            f"""
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-                <div style="background-color: #E8F0FE; border-radius: 10px; padding: 10px; max-width: 80%;">
-                    {message}
-                </div>
+        st.markdown(f"""
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+            <div style="background-color: #2b313e; border-radius: 10px; padding: 10px; max-width: 80%;">
+                <p style="color: white; margin: 0;">{message}</p>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.markdown(
-            f"""
-            <div style="display: flex; justify-content: flex-start; margin-bottom: 10px;">
-                <div style="background-color: #F1F3F4; border-radius: 10px; padding: 10px; max-width: 80%;">
-                    {message}
-                </div>
+        st.markdown(f"""
+        <div style="display: flex; justify-content: flex-start; margin-bottom: 10px;">
+            <div style="background-color: #0e1117; border: 1px solid #262730; border-radius: 10px; padding: 10px; max-width: 80%;">
+                <p style="color: white; margin: 0;">{message}</p>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+        </div>
+        """, unsafe_allow_html=True)
 
-def display_time_series(data, title, height=400):
-    """
-    Display a time series chart using Plotly
+def display_time_series(data: List[Dict[str, Any]], title: str = "Time Series", height: int = 400):
+    """Display a time series chart using Plotly"""
+    # Extract time and value from data
+    times = [point.get("time") for point in data]
+    values = [point.get("value") for point in data]
     
-    Args:
-        data: Time series data
-        title: Chart title
-        height: Chart height
-    """
     # Create figure
     fig = go.Figure()
     
-    # Convert data to proper format if needed
-    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-        # Extract timestamps and values
-        timestamps = [item.get("timestamp") for item in data]
-        values = [item.get("value") for item in data]
-        
-        # Add trace
-        fig.add_trace(go.Scatter(
-            x=timestamps,
-            y=values,
-            mode='lines',
-            name='Value'
-        ))
-    elif isinstance(data, pd.DataFrame):
-        # Use DataFrame directly
-        if "timestamp" in data.columns and "value" in data.columns:
-            fig.add_trace(go.Scatter(
-                x=data["timestamp"],
-                y=data["value"],
-                mode='lines',
-                name='Value'
-            ))
-        elif data.index.name == "timestamp" or isinstance(data.index, pd.DatetimeIndex):
-            fig.add_trace(go.Scatter(
-                x=data.index,
-                y=data.iloc[:, 0],
-                mode='lines',
-                name=data.columns[0]
-            ))
+    # Add time series
+    fig.add_trace(go.Scatter(
+        x=times,
+        y=values,
+        mode='lines',
+        name='Value'
+    ))
     
     # Update layout
     fig.update_layout(
         title=title,
-        height=height,
-        margin=dict(l=10, r=10, t=40, b=10),
         xaxis_title="Time",
         yaxis_title="Value",
-        template="plotly_white"
+        height=height,
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=30, b=10)
     )
     
-    # Display the figure
+    # Display figure
     st.plotly_chart(fig, use_container_width=True)
 
-def display_frequency_spectrum(data, title, height=400):
-    """
-    Display a frequency spectrum chart using Plotly
+def display_frequency_spectrum(data: List[Dict[str, Any]], title: str = "Frequency Spectrum", height: int = 400):
+    """Display a frequency spectrum chart using Plotly"""
+    # Extract frequency and amplitude from data
+    frequencies = [point.get("frequency") for point in data]
+    amplitudes = [point.get("amplitude") for point in data]
     
-    Args:
-        data: Spectrum data
-        title: Chart title
-        height: Chart height
-    """
     # Create figure
     fig = go.Figure()
     
-    # Convert data to proper format if needed
-    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-        # Extract frequencies and amplitudes
-        frequencies = [item.get("frequency") for item in data]
-        amplitudes = [item.get("amplitude") for item in data]
-        
-        # Add trace
-        fig.add_trace(go.Scatter(
-            x=frequencies,
-            y=amplitudes,
-            mode='lines',
-            name='Amplitude'
-        ))
+    # Add frequency spectrum
+    fig.add_trace(go.Bar(
+        x=frequencies,
+        y=amplitudes,
+        name='Amplitude'
+    ))
     
     # Update layout
     fig.update_layout(
         title=title,
-        height=height,
-        margin=dict(l=10, r=10, t=40, b=10),
         xaxis_title="Frequency (Hz)",
         yaxis_title="Amplitude",
-        template="plotly_white"
+        height=height,
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=30, b=10)
     )
     
-    # Display the figure
+    # Display figure
     st.plotly_chart(fig, use_container_width=True)
 
-def display_comparison_chart(original_data, processed_data, title, height=400):
-    """
-    Display a comparison chart of original and processed data
-    
-    Args:
-        original_data: Original data
-        processed_data: Processed data
-        title: Chart title
-        height: Chart height
-    """
+def display_comparison_chart(datasets: List[Dict[str, Any]], title: str = "Comparison", height: int = 400):
+    """Display a comparison chart for multiple datasets using Plotly"""
     # Create figure
     fig = go.Figure()
     
-    # Convert data to proper format if needed
-    if (isinstance(original_data, list) and len(original_data) > 0 and
-        isinstance(original_data[0], dict) and
-        isinstance(processed_data, list) and len(processed_data) > 0 and
-        isinstance(processed_data[0], dict)):
-        
-        # Extract time and values
-        original_times = [item.get("time") for item in original_data]
-        original_values = [item.get("value") for item in original_data]
-        
-        processed_times = [item.get("time") for item in processed_data]
-        processed_values = [item.get("value") for item in processed_data]
-        
-        # Add traces
-        fig.add_trace(go.Scatter(
-            x=original_times,
-            y=original_values,
-            mode='lines',
-            name='Original'
-        ))
+    # Add each dataset
+    for dataset in datasets:
+        name = dataset.get("name", "Unknown")
+        x_data = dataset.get("x", [])
+        y_data = dataset.get("y", [])
         
         fig.add_trace(go.Scatter(
-            x=processed_times,
-            y=processed_values,
+            x=x_data,
+            y=y_data,
             mode='lines',
-            name='Processed',
-            line=dict(color='red')
+            name=name
         ))
     
     # Update layout
     fig.update_layout(
         title=title,
+        xaxis_title="X",
+        yaxis_title="Y",
         height=height,
-        margin=dict(l=10, r=10, t=40, b=10),
-        xaxis_title="Time",
-        yaxis_title="Value",
-        template="plotly_white",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=30, b=10)
     )
     
-    # Display the figure
+    # Display figure
     st.plotly_chart(fig, use_container_width=True)
 
-def display_forecast_chart(historical_data, forecast_data, methods, title, height=500):
-    """
-    Display a forecast chart with historical data and predictions
-    
-    Args:
-        historical_data: Historical time series data
-        forecast_data: Dictionary of forecast data by method
-        methods: List of forecast methods to display
-        title: Chart title
-        height: Chart height
-    """
+def display_forecast_chart(
+    historical_data: List[Dict[str, Any]], 
+    forecast_data: List[Dict[str, Any]],
+    lower_bound: Optional[List[Dict[str, Any]]] = None,
+    upper_bound: Optional[List[Dict[str, Any]]] = None,
+    title: str = "Forecast", 
+    height: int = 400
+):
+    """Display a forecast chart with historical data and predictions"""
     # Create figure
     fig = go.Figure()
+    
+    # Extract data
+    hist_times = [point.get("time") for point in historical_data]
+    hist_values = [point.get("value") for point in historical_data]
+    
+    forecast_times = [point.get("time") for point in forecast_data]
+    forecast_values = [point.get("value") for point in forecast_data]
     
     # Add historical data
-    if isinstance(historical_data, list) and len(historical_data) > 0:
-        timestamps = [item.get("timestamp") for item in historical_data]
-        values = [item.get("value") for item in historical_data]
+    fig.add_trace(go.Scatter(
+        x=hist_times,
+        y=hist_values,
+        mode='lines',
+        name='Historical',
+        line=dict(color='blue')
+    ))
+    
+    # Add forecast data
+    fig.add_trace(go.Scatter(
+        x=forecast_times,
+        y=forecast_values,
+        mode='lines',
+        name='Forecast',
+        line=dict(color='red')
+    ))
+    
+    # Add confidence interval if provided
+    if lower_bound and upper_bound:
+        lower_times = [point.get("time") for point in lower_bound]
+        lower_values = [point.get("value") for point in lower_bound]
+        
+        upper_times = [point.get("time") for point in upper_bound]
+        upper_values = [point.get("value") for point in upper_bound]
         
         fig.add_trace(go.Scatter(
-            x=timestamps,
-            y=values,
-            mode='lines',
-            name='Historical',
-            line=dict(color='blue')
+            x=lower_times + upper_times[::-1],
+            y=lower_values + upper_values[::-1],
+            fill='toself',
+            fillcolor='rgba(255, 0, 0, 0.2)',
+            line=dict(color='rgba(255, 255, 255, 0)'),
+            name='Confidence Interval'
         ))
-    
-    # Add forecast data for each method
-    colors = ['red', 'green', 'orange', 'purple', 'teal']
-    
-    for i, method in enumerate(methods):
-        if method in forecast_data:
-            method_data = forecast_data[method]
-            
-            # Extract data
-            timestamps = [item.get("timestamp") for item in method_data]
-            values = [item.get("value") for item in method_data]
-            lower_bounds = [item.get("lower_bound") for item in method_data]
-            upper_bounds = [item.get("upper_bound") for item in method_data]
-            
-            # Add forecast line
-            fig.add_trace(go.Scatter(
-                x=timestamps,
-                y=values,
-                mode='lines',
-                name=f'{method.capitalize()}',
-                line=dict(color=colors[i % len(colors)])
-            ))
-            
-            # Add confidence interval
-            fig.add_trace(go.Scatter(
-                x=timestamps + timestamps[::-1],
-                y=upper_bounds + lower_bounds[::-1],
-                fill='toself',
-                fillcolor=colors[i % len(colors)],
-                line=dict(color='rgba(255,255,255,0)'),
-                hoverinfo="skip",
-                showlegend=False,
-                opacity=0.2
-            ))
     
     # Update layout
     fig.update_layout(
         title=title,
-        height=height,
-        margin=dict(l=10, r=10, t=40, b=10),
         xaxis_title="Time",
         yaxis_title="Value",
-        template="plotly_white",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        height=height,
+        template="plotly_dark",
+        margin=dict(l=10, r=10, t=30, b=10)
     )
     
-    # Display the figure
+    # Display figure
     st.plotly_chart(fig, use_container_width=True)
 
-def display_system_metrics(metrics):
-    """
-    Display system metrics in a clean format
+def display_system_metrics(metrics: Dict[str, Any], title: str = "System Metrics"):
+    """Display system metrics in a clean layout"""
+    st.subheader(title)
     
-    Args:
-        metrics: Dictionary of system metrics
-    """
-    cols = st.columns(len(metrics))
+    # Create columns for metrics
+    columns = st.columns(3)
     
-    for i, (label, value) in enumerate(metrics.items()):
-        with cols[i]:
-            st.metric(label=label, value=value)
+    # Display each metric in a column
+    for i, (key, value) in enumerate(metrics.items()):
+        col_idx = i % 3
+        with columns[col_idx]:
+            if isinstance(value, (int, float)):
+                # Format number
+                if value > 1000000:
+                    formatted_value = f"{value/1000000:.2f}M"
+                elif value > 1000:
+                    formatted_value = f"{value/1000:.2f}K"
+                else:
+                    formatted_value = f"{value:.2f}" if isinstance(value, float) else str(value)
+                
+                st.metric(key, formatted_value)
+            else:
+                # Just show as text
+                st.metric(key, str(value))
 
-def display_json_data(data, title="Data", expanded=False):
-    """
-    Display JSON data in an expandable section
-    
-    Args:
-        data: Data to display
-        title: Section title
-        expanded: Whether to show expanded by default
-    """
-    with st.expander(title, expanded=expanded):
-        st.json(data)
+def display_json_data(data: Dict[str, Any], expanded: bool = False):
+    """Display JSON data in a nice format"""
+    st.json(data, expanded=expanded)

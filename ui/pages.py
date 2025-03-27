@@ -15,6 +15,8 @@ from ui.components import (
     display_json_data
 )
 
+# Add the missing pages for signal processing and settings
+
 def conversation_page():
     """
     Render the main conversation page
